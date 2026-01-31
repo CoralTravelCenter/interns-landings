@@ -1,52 +1,22 @@
 import fs from "node:fs";
 import path from "node:path";
 import {build} from "vite";
+import vue from "@vitejs/plugin-vue";
 
-const ROOT = process.cwd();
+import {cleanDir, ensureDir, existsFile, normalizeHtml, r, readBlocks} from "./_utils.mjs";
 
-const ORDER_FILE = path.resolve(ROOT, "src/order.json");
+const ORDER_FILE = r("src/order.json");
 
-const MARKUP_DIR = path.resolve(ROOT, "src/markup");
-const STYLES_DIR = path.resolve(ROOT, "src/styles");
-const SCRIPTS_DIR = path.resolve(ROOT, "src/scripts");
+const MARKUP_DIR = r("src/markup");
+const STYLES_DIR = r("src/styles");
+const SCRIPTS_DIR = r("src/scripts");
 
-const OUT_DIR = path.resolve(ROOT, "@CMS");
+const OUT_DIR = r("@CMS");
 
-// ---------- utils ----------
-
-function readBlocks() {
-  if (!fs.existsSync(ORDER_FILE)) return [];
-  const json = JSON.parse(fs.readFileSync(ORDER_FILE, "utf8"));
-  return Array.isArray(json?.blocks) ? json.blocks.filter(Boolean) : [];
-}
-
-function existsFile(p) {
-  try {
-    return fs.existsSync(p) && fs.statSync(p).isFile();
-  } catch {
-    return false;
-  }
-}
-
-function ensureDir(p) {
-  fs.mkdirSync(p, {recursive: true});
-}
-
-function cleanDir(p) {
-  if (!fs.existsSync(p)) return;
-  for (const f of fs.readdirSync(p)) {
-    fs.rmSync(path.join(p, f), {recursive: true, force: true});
-  }
-}
-
-function normalizeHtml(html) {
-  return html.replace(/\r\n/g, "\n").trim();
-}
-
-// ---------- CSS ----------
+// ---------- CSS (from styles/<key>.scss|css) ----------
 
 async function bundleCssInline(absCssPath) {
-  const rel = "/" + path.relative(ROOT, absCssPath).replaceAll("\\", "/");
+  const rel = "/" + path.relative(process.cwd(), absCssPath).replaceAll("\\", "/");
 
   const V_ID = "virtual:cms-css";
   const R_ID = "\0" + V_ID;
@@ -58,9 +28,7 @@ async function bundleCssInline(absCssPath) {
       if (id === V_ID) return R_ID;
     },
     load(id) {
-      if (id === R_ID) {
-        return `import ${JSON.stringify(rel)};`;
-      }
+      if (id === R_ID) return `import ${JSON.stringify(rel)};`;
     },
   };
 
@@ -71,26 +39,26 @@ async function bundleCssInline(absCssPath) {
       write: false,
       minify: "esbuild",
       cssCodeSplit: true,
-      rollupOptions: {
-        input: V_ID, // важно: тут оставляем НЕ \0, resolveId превратит в \0...
-      },
+      rollupOptions: {input: V_ID},
     },
   });
 
+  const cssParts = [];
   for (const out of Array.isArray(res) ? res : [res]) {
     for (const item of out.output) {
       if (item.type === "asset" && item.fileName.endsWith(".css")) {
-        return String(item.source || "").trim();
+        const css = String(item.source || "").trim();
+        if (css) cssParts.push(css);
       }
     }
   }
-  return "";
+  return cssParts.join("\n");
 }
 
-// ---------- JS ----------
+// ---------- JS (+ CSS extracted from Vue/JS imports) ----------
 
 async function bundleJsInline(absJsPath) {
-  const rel = "/" + path.relative(ROOT, absJsPath).replaceAll("\\", "/");
+  const rel = "/" + path.relative(process.cwd(), absJsPath).replaceAll("\\", "/");
 
   const V_ID = "virtual:cms-js";
   const R_ID = "\0" + V_ID;
@@ -103,7 +71,7 @@ async function bundleJsInline(absJsPath) {
     },
     load(id) {
       if (id === R_ID) {
-        // ВАЖНО: если ты вернулся к export default init(), то тут надо вызвать init()
+        // контракт: scripts/<key>.js экспортирует default init()
         return `
 import init from ${JSON.stringify(rel)};
 try { if (typeof init === "function") init(); } catch (e) { console.warn(e); }
@@ -114,28 +82,32 @@ try { if (typeof init === "function") init(); } catch (e) { console.warn(e); }
 
   const res = await build({
     logLevel: "silent",
-    plugins: [virtualJs],
+    plugins: [vue(), virtualJs],
     build: {
       write: false,
       minify: "esbuild",
+      cssCodeSplit: true,
       rollupOptions: {
         input: V_ID,
-        output: {
-          format: "iife",
-          inlineDynamicImports: true,
-        },
+        output: {format: "iife", inlineDynamicImports: true},
       },
     },
   });
 
+  let js = "";
+  const cssParts = [];
+
   for (const out of Array.isArray(res) ? res : [res]) {
     for (const item of out.output) {
-      if (item.type === "chunk" && item.isEntry) {
-        return item.code.trim();
+      if (item.type === "chunk" && item.isEntry) js = item.code.trim();
+      if (item.type === "asset" && item.fileName.endsWith(".css")) {
+        const css = String(item.source || "").trim();
+        if (css) cssParts.push(css);
       }
     }
   }
-  return "";
+
+  return {js, css: cssParts.join("\n")};
 }
 
 // ---------- block build ----------
@@ -144,18 +116,36 @@ async function buildBlock(key) {
   const htmlPath = path.join(MARKUP_DIR, `${key}.html`);
   if (!existsFile(htmlPath)) return null;
 
-  const cssPath = path.join(STYLES_DIR, `${key}.css`);
+  const cssPathScss = path.join(STYLES_DIR, `${key}.scss`);
+  const cssPathCss = path.join(STYLES_DIR, `${key}.css`);
   const jsPath = path.join(SCRIPTS_DIR, `${key}.js`);
 
   const html = normalizeHtml(fs.readFileSync(htmlPath, "utf8"));
 
-  const css = existsFile(cssPath) ? await bundleCssInline(cssPath) : "";
-  const js = existsFile(jsPath) ? await bundleJsInline(jsPath) : "";
+  // приоритет: scss -> css
+  const cssPath = existsFile(cssPathScss)
+    ? cssPathScss
+    : existsFile(cssPathCss)
+      ? cssPathCss
+      : null;
+
+  const blockCss = cssPath ? await bundleCssInline(cssPath) : "";
+
+  let js = "";
+  let jsCss = "";
+  if (existsFile(jsPath)) {
+    const out = await bundleJsInline(jsPath);
+    js = out.js || "";
+    jsCss = out.css || "";
+  }
 
   const parts = [];
 
-  if (css) parts.push(`<style>\n${css}\n</style>`);
+  const mergedCss = [blockCss, jsCss].filter(Boolean).join("\n");
+  if (mergedCss) parts.push(`<style>\n${mergedCss}\n</style>`);
+
   parts.push(html);
+
   if (js) parts.push(`<script>\n${js}\n</script>`);
 
   return parts.join("\n\n") + "\n";
@@ -167,7 +157,7 @@ async function run() {
   ensureDir(OUT_DIR);
   cleanDir(OUT_DIR);
 
-  const blocks = readBlocks();
+  const blocks = readBlocks(ORDER_FILE);
   if (!blocks.length) {
     console.log("[CMS] order.json is empty");
     return;

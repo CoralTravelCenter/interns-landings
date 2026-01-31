@@ -2,30 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import chokidar from "chokidar";
 
+import {absEq, ensureDir, existsFile, r, readBlocks, writeIfChanged} from "./_utils.mjs";
+
 const WATCH = process.argv.includes("--watch");
 
-const ORDER_FILE = path.resolve(process.cwd(), "src/order.json");
+const ORDER_FILE = r("src/order.json");
 
-const SCRIPTS_DIR = path.resolve(process.cwd(), "src/scripts");
+const SCRIPTS_DIR = r("src/scripts");
 const OUT_FILE = path.join(SCRIPTS_DIR, "index.js");
-
-function readBlocks() {
-  if (!fs.existsSync(ORDER_FILE)) return [];
-  try {
-    const json = JSON.parse(fs.readFileSync(ORDER_FILE, "utf8"));
-    return Array.isArray(json?.blocks) ? json.blocks.filter(Boolean) : [];
-  } catch {
-    return [];
-  }
-}
-
-function fileExists(p) {
-  try {
-    return fs.existsSync(p) && fs.statSync(p).isFile();
-  } catch {
-    return false;
-  }
-}
 
 function stripCommentsAndWhitespace(code) {
   return code
@@ -47,29 +31,21 @@ function isUsableScript(fullPath) {
   return true;
 }
 
-function writeIfChanged(next) {
-  const prev = fs.existsSync(OUT_FILE) ? fs.readFileSync(OUT_FILE, "utf8") : "";
-  if (prev !== next) {
-    fs.writeFileSync(OUT_FILE, next);
-    console.log(`[gen-scripts] updated${next.includes("new Map();") ? " (empty)" : ""}`);
-  }
-}
-
 function generate() {
-  fs.mkdirSync(SCRIPTS_DIR, {recursive: true});
+  ensureDir(SCRIPTS_DIR);
 
-  const blocks = readBlocks();
+  const blocks = readBlocks(ORDER_FILE);
   const usableKeys = [];
 
   for (const key of blocks) {
     const jsFile = path.join(SCRIPTS_DIR, `${key}.js`);
-    if (!fileExists(jsFile)) continue;
+    if (!existsFile(jsFile)) continue;
     if (!isUsableScript(jsFile)) continue;
     usableKeys.push(key);
   }
 
   if (usableKeys.length === 0) {
-    writeIfChanged("export default new Map();\n");
+    writeIfChanged(OUT_FILE, "export default new Map();\n", "[gen-scripts] updated (empty)");
     return;
   }
 
@@ -81,7 +57,11 @@ function generate() {
     .map((key, i) => `[${JSON.stringify(key)}, init${i}]`)
     .join(", ");
 
-  writeIfChanged(`${imports}\n\nexport default new Map([${entries}]);\n`);
+  writeIfChanged(
+    OUT_FILE,
+    `${imports}\n\nexport default new Map([${entries}]);\n`,
+    "[gen-scripts] updated"
+  );
 }
 
 // once
@@ -95,8 +75,6 @@ if (WATCH) {
     t = setTimeout(generate, 80);
   };
 
-  const outResolved = path.resolve(OUT_FILE);
-
   chokidar
     .watch([ORDER_FILE, SCRIPTS_DIR], {
       ignoreInitial: true,
@@ -107,8 +85,7 @@ if (WATCH) {
     .on("addDir", schedule)
     .on("unlinkDir", schedule)
     .on("change", (filePath) => {
-      // ключевой фикс: игнорим собственный index.js по полному пути
-      if (path.resolve(filePath) === outResolved) return;
+      if (absEq(filePath, OUT_FILE)) return; // анти-луп
       schedule();
     });
 }

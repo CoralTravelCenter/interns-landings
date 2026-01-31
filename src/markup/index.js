@@ -1,5 +1,3 @@
-import h0 from './hero.html?raw';
-import h1 from './welcome.html?raw';
-import h2 from './test.html?raw';
+import h0 from './welcome.html?raw';
 
-export default [{ key: "hero", html: h0 }, { key: "welcome", html: h1 }, { key: "test", html: h2 }];
+export default [{ key: "welcome", html: h0 }];

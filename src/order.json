@@ -1,7 +1,5 @@
 {
   "blocks": [
-    "hero",
-    "welcome",
-    "test"
+    "welcome"
   ]
 }

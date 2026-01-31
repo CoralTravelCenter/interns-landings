@@ -1,23 +1,30 @@
 {
   "name": "interns-landings",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
-    "gen:markup": "node src/gen-markup-index.mjs",
-    "gen:scripts": "node src/gen-scripts-index.mjs",
-    "gen:styles": "node src/gen-styles-index.mjs",
-    "gen:markup:watch": "node src/gen-markup-index.mjs --watch",
-    "gen:scripts:watch": "node src/gen-scripts-index.mjs --watch",
-    "gen:styles:watch": "node src/gen-styles-index.mjs --watch",
+    "rewrite:images": "node src/lib/rewriteAssetsBuild.mjs",
+    "cdn": "node src/lib/cdn-server.mjs",
+    "gen:markup": "node src/lib/gen-markup-index.mjs",
+    "gen:scripts": "node src/lib/gen-scripts-index.mjs",
+    "gen:styles": "node src/lib/gen-styles-index.mjs",
+    "gen:markup:watch": "node src/lib/gen-markup-index.mjs --watch",
+    "gen:scripts:watch": "node src/lib/gen-scripts-index.mjs --watch",
+    "gen:styles:watch": "node src/lib/gen-styles-index.mjs --watch",
     "gen:all": "npm run gen:markup && npm run gen:scripts && npm run gen:styles",
-    "dev": "npm run gen:all && concurrently -n ORDER,MARKUP,SCRIPTS,STYLES,VITE -c auto \"npm:gen:markup:watch\" \"npm:gen:scripts:watch\" \"npm:gen:styles:watch\" \"vite\"",
-    "build": "node src/build-cms.mjs"
+    "dev": "npm run gen:all && concurrently -n MARKUP,SCRIPTS,STYLES,CDN,VITE -c auto \"npm:gen:markup:watch\" \"npm:gen:scripts:watch\" \"npm:gen:styles:watch\" \"npm:cdn\" \"vite\"",
+    "build": "node src/lib/build-cms.mjs && node src/lib/rewriteAssetsBuild.mjs"
   },
   "devDependencies": {
     "chokidar": "^5.0.0",
     "concurrently": "^9.2.1",
+    "sass": "^1.97.3",
     "vite": "^5.2.12",
     "vite-plugin-monkey": "^4.0.0"
+  },
+  "dependencies": {
+    "@vitejs/plugin-vue": "^6.0.3",
+    "express": "^5.2.1"
   }
 }

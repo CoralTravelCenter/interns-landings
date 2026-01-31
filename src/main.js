@@ -1,6 +1,7 @@
 import "./styles"; // index.js из styles (если используешь styles watcher)
 import parts from "./markup";
 import initsMap from "./scripts";
+import {setupLocalCdnAssetRewrite} from "./lib/rewriteAssetsDev.js";
 
 const CONTAINER_ID = "monkey-app";
 const FLAG = "monkeyMounted";
@@ -26,4 +27,9 @@ function mount(container) {
   const container = document.getElementById(CONTAINER_ID);
   if (!container) return;
   mount(container);
+  setupLocalCdnAssetRewrite({
+    root: container,
+    cdnBase: "http://localhost:3001",
+    enabled: true, // dev-only (потому что этот код будет жить только в dev bundle)
+  });
 })();

@@ -1,3 +1,3 @@
-import init0 from './test.js';
+import init0 from './welcome.js';
 
-export default new Map([["test", init0]]);
+export default new Map([["welcome", init0]]);
